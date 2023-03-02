@@ -1,0 +1,175 @@
+var excel_qr = SpreadsheetApp.getActiveSpreadsheet();
+var sheet_qr = excel_qr.getSheetByName("Configuracion");
+var api_interna = "http://185.245.183.83:5001/inicio_bot";
+
+var appscript = sheet_qr.getRange(1, 2).getValue();
+function onOpen() {
+    var menu = SpreadsheetApp.getUi().createMenu("Whatsapp");
+    menu.addItem('1) Obtener TOKEN Session - QR Whatsapp', 'qrwhatsapp');
+    menu.addItem('2) Enviar Mensajes - Whatsapp', 'enviarwhatsapp');
+    menu.addToUi();
+}
+function doPost(e) {
+    var operacion = JSON.parse(e.postData.contents)
+    var respuesta = "";
+    if (operacion.op == "qr") {
+        respuesta = generar(JSON.stringify(operacion));
+    }
+    if (operacion.op == "resultado") {
+        respuesta = resultado(JSON.stringify(operacion));
+    }
+    return ContentService.createTextOutput(respuesta).setMimeType(ContentService.MimeType.JSON);
+}
+
+function resultado(informacion) {
+    try {
+        var resultado = JSON.parse(informacion);
+        var excel = SpreadsheetApp.getActiveSpreadsheet();
+        var sheet = excel.getSheetByName("MensajeManual");
+        for (let i = 0; i < resultado.mensajes.length; i++) {
+            sheet.getRange((2 + (parseInt(resultado.mensajes[i].posicion))), 6).setValue(resultado.mensajes[i].estado);
+        }
+        var result, jo = {};
+        jo.status = '0';
+        jo.message = ' Se grabo el registrp';
+    } catch (e) {
+        jo.status = '-1';
+        jo.message = e.toString();
+    }
+    var result = JSON.stringify(jo);
+    return result;
+}
+
+
+function enviarwhatsapp() {
+
+    var response = "No"
+    var token_session = "";
+    try {
+        token_session = sheet_qr.getRange(3, 2).getValue();
+        var response = Browser.msgBox('Seguro que quiere validar los siguientes numero de whatsapp ahora , el token de session sera : ' + token_session + ' ?', Browser.Buttons.YES_NO);
+    } catch (e) {
+        Browser.msgBox('La acción no se ha realizado', Browser.Buttons.OK);
+    }
+    if (response == "yes") {
+
+        if (excel_qr.getSheetByName("MensajeManual")) {
+            var dataArray = [];
+            var excel = SpreadsheetApp.getActiveSpreadsheet();
+            var sheet = excel.getSheetByName("MensajeManual");
+            var rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
+             for (var i = 0, l = rows.length; i < l; i++) {
+                var numero = rows[i][0];
+                var mensaje = rows[i][1];
+                var imagen = rows[i][2];
+                var url = rows[i][3];
+                var boton = rows[i][4];
+                var arrayNumero = ("" + numero).split(";");
+                for (var ii = 0; ii < arrayNumero.length; ii++) {
+                    if (mensaje) {
+                        var record = {};
+                        record['numero'] = arrayNumero[ii];
+                        record['mensaje'] = mensaje;
+                        record['posicion'] = ""+i;
+                        dataArray.push(record);
+                    }
+                    if (imagen) {
+                        var record = {};
+                        record['numero'] = arrayNumero[ii];
+                        record['imagenbase64'] = imagen;
+                        record['posicion'] = ""+i;
+                        dataArray.push(record);
+                    }
+                    if (url) {
+                        var record = {};
+                        record['numero'] = arrayNumero[ii];
+                        record['url'] = url;
+                        record['posicion'] = ""+i;
+                        dataArray.push(record);
+                    }
+                    if (boton) {
+                        var record = {};
+                        record['numero'] = arrayNumero[ii];
+                        record['boton'] = "boton";
+                        record['contenido'] = JSON.parse(boton);
+                        record['posicion'] = ""+i;
+                        dataArray.push(record);
+                    }
+                }
+             }
+
+            var payload = { "url_notificacion": appscript, "cantidad_a_notificar": 10, "bot": "BOT_" + token_session, "mensajes": dataArray };
+            payload.load_session = token_session;
+            var options =
+            {
+                'headers': { "Content-Type": "application/json" },
+                'method': "POST",
+                'payload': JSON.stringify(payload)
+            };
+            try {
+                var response = UrlFetchApp.fetch(api_interna, options);
+                var json = JSON.parse(response.getContentText());
+                if (json.status == "0") {
+                    Browser.msgBox('Se notificaron los mensajes', Browser.Buttons.OK);
+                } else {
+                    Browser.msgBox('Error al iniciar : ' + json.message, Browser.Buttons.OK);
+                }
+            } catch (e) {
+                Browser.msgBox('Se notificaron los mensajes asincrono ', Browser.Buttons.OK);
+            }
+        }
+    }
+}
+
+
+function generar(informacion) {
+
+    try {
+        var qr = JSON.parse(informacion);
+        sheet_qr.getRange(2, 2).setValue(encodeURIComponent(qr.qr));
+        var result, jo = {};
+        if (qr.numero && qr.qr == "CONECTADO") {
+            sheet_qr.getRange(3, 2).setValue(qr.session);
+        }
+        jo.status = '0';
+        jo.message = ' Se grabo el registro';
+    } catch (e) {
+        jo.status = '-1';
+        jo.message = e.toString();
+    }
+
+    var result = JSON.stringify(jo);
+    return result;
+}
+
+function qrwhatsapp() {
+    var response = "No"
+    try {
+        //sheet_qr.getRange(3, 2).setValue("");
+        var response = Browser.msgBox('Seguro que quiere generar QR ahora ?', Browser.Buttons.YES_NO);
+    } catch (e) {
+        Browser.msgBox('La acción no se ha realizado', Browser.Buttons.OK);
+    }
+
+    if (response == "yes") {
+        enviar();
+        Browser.msgBox('La acción ha sido realizada , escanear registros luego de 10 segundos', Browser.Buttons.OK);
+    }
+}
+function enviar() {
+
+    var qr_session = "GA" + Utilities.formatDate(new Date(), "GMT-5", "yyMMddHHmmss");
+    var payload = { "url_notificacion": appscript, "graba_session": qr_session };
+    var options =
+    {
+        'headers': { "Content-Type": "application/json" },
+        'method': "POST",
+        'payload': JSON.stringify(payload)
+    };
+    try {
+        var response = UrlFetchApp.fetch(api_interna, options);
+        var json = JSON.parse(response.getContentText());
+    } catch (e) {
+
+    }
+}
